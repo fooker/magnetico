@@ -13,7 +13,7 @@
 # You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
 # <http://www.gnu.org/licenses/>.
 import logging
-import sqlite3
+import pyrqlite.dbapi2 as rqlite
 import time
 import typing
 import os
@@ -34,9 +34,9 @@ class Database:
         self.__pending_files = []  # type: typing.List[typing.Tuple[bytes, int, bytes]]
 
     @staticmethod
-    def __connect(database) -> sqlite3.Connection:
+    def __connect(database) -> rqlite.Connection:
         os.makedirs(os.path.split(database)[0], exist_ok=True)
-        db_conn = sqlite3.connect(database, isolation_level=None)
+        db_conn = rqlite.connect(host='localhost', port=4001)
 
         db_conn.execute("PRAGMA journal_mode=WAL;")
         db_conn.execute("PRAGMA temp_store=1;")
@@ -45,7 +45,7 @@ class Database:
         with db_conn:
             db_conn.execute("CREATE TABLE IF NOT EXISTS torrents ("
                             "id             INTEGER PRIMARY KEY AUTOINCREMENT,"
-                            "info_hash      BLOB NOT NULL UNIQUE,"
+                            "info_hash      TEXT NOT NULL UNIQUE,"
                             "name           TEXT NOT NULL,"
                             "total_size     INTEGER NOT NULL CHECK(total_size > 0),"
                             "discovered_on  INTEGER NOT NULL CHECK(discovered_on > 0)"
@@ -102,7 +102,7 @@ class Database:
             return False
         cur = self.__db_conn.cursor()
         try:
-            cur.execute("SELECT count(info_hash) FROM torrents where info_hash = ?;", [info_hash])
+            cur.execute("SELECT count(info_hash) FROM torrents where info_hash = ?;", [info_hash.hex()])
             x, = cur.fetchone()
             return x == 0
         finally:
@@ -111,6 +111,7 @@ class Database:
     def __commit_metadata(self) -> None:
         cur = self.__db_conn.cursor()
         cur.execute("BEGIN;")
+        self.__pending_metadata = [(o[0].hex(), o[1], o[2], o[3]) for o in self.__pending_metadata]
         # noinspection PyBroadException
         try:
             cur.executemany(
