@@ -42,20 +42,21 @@ class Database:
         db_conn.execute("PRAGMA temp_store=1;")
         db_conn.execute("PRAGMA foreign_keys=ON;")
 
-        db_conn.execute("CREATE TABLE IF NOT EXISTS torrents ("
-                        "id             INTEGER PRIMARY KEY AUTOINCREMENT,"
-                        "info_hash      TEXT NOT NULL UNIQUE,"
-                        "name           TEXT NOT NULL,"
-                        "total_size     INTEGER NOT NULL CHECK(total_size > 0),"
-                        "discovered_on  INTEGER NOT NULL CHECK(discovered_on > 0)"
-                        ");")
-        db_conn.execute("CREATE INDEX IF NOT EXISTS info_hash_index ON torrents (info_hash);")
-        db_conn.execute("CREATE TABLE IF NOT EXISTS files ("
-                        "id          INTEGER PRIMARY KEY,"
-                        "torrent_id  INTEGER REFERENCES torrents ON DELETE CASCADE ON UPDATE RESTRICT,"
-                        "size        INTEGER NOT NULL,"
-                        "path        TEXT NOT NULL"
-                        ");")
+        with db_conn.cursor() as cur:
+            cur.execute("CREATE TABLE IF NOT EXISTS torrents ("
+                            "id             INTEGER PRIMARY KEY AUTOINCREMENT,"
+                            "info_hash      TEXT NOT NULL UNIQUE,"
+                            "name           TEXT NOT NULL,"
+                            "total_size     INTEGER NOT NULL CHECK(total_size > 0),"
+                            "discovered_on  INTEGER NOT NULL CHECK(discovered_on > 0)"
+                            ");")
+            cur.execute("CREATE INDEX IF NOT EXISTS info_hash_index ON torrents (info_hash);")
+            cur.execute("CREATE TABLE IF NOT EXISTS files ("
+                            "id          INTEGER PRIMARY KEY,"
+                            "torrent_id  INTEGER REFERENCES torrents ON DELETE CASCADE ON UPDATE RESTRICT,"
+                            "size        INTEGER NOT NULL,"
+                            "path        TEXT NOT NULL"
+                            ");")
 
         return db_conn
 
