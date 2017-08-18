@@ -147,7 +147,7 @@ class Database:
 
         cur = self.__db_conn.cursor()
         # noinspection PyBroadException
-        for index in range(metadata_counter):
+        for i in range(metadata_counter):
             cur.execute("BEGIN;")
             try:
                 cur.executemany(
