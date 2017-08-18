@@ -109,6 +109,7 @@ class Database:
             cur.close()
 
     def __commit_metadata(self) -> None:
+        unclean = False
         cur = self.__db_conn.cursor()
         cur.execute("BEGIN;")
         # noinspection PyBroadException
@@ -129,10 +130,12 @@ class Database:
             self.__pending_files.clear()
         except:
             cur.execute("ROLLBACK;")
+            unclean = True
             logging.exception("Could NOT commit all metadata at once to the database! Trying one by one now...")
-            self.__commit_metadata_single()
         finally:
             cur.close()
+            if unclean:
+                self.__commit_metadata_single()
 
     def __commit_metadata_single(self) -> None:
         success_counter = 0
