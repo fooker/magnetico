@@ -140,8 +140,8 @@ class Database:
     def __commit_metadata_single(self) -> None:
         success_counter = 0
         metadata_counter = len(self.__pending_metadata)
-        metada = self.__pending_metadata
-        pending_files = self.__pending_files
+        metadata = self.__pending_metadata
+        files = self.__pending_files
         self.__pending_metadata.clear()
         self.__pending_files.clear()
 
@@ -157,11 +157,9 @@ class Database:
                 cur.executemany(
                     "INSERT INTO files (torrent_id, size, path) "
                     "VALUES ((SELECT id FROM torrents WHERE info_hash=?), ?, ?);",
-                    [pending_files[i]]
+                    [files[i]]
                 )
                 cur.execute("COMMIT;")
-                logging.info("%d metadata (%d files) are committed to the database.",
-                              len(self.__pending_metadata), len(self.__pending_files))
                 success_counter = succes_counter + 1
             except:
                 cur.execute("ROLLBACK;")
