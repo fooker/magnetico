@@ -146,7 +146,6 @@ class Database:
         self.__pending_files.clear()
 
         cur = self.__db_conn.cursor()
-        cur.execute("BEGIN;")
         # noinspection PyBroadException
         for index in range(metadata_counter):
             cur.execute("BEGIN;")
