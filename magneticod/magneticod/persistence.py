@@ -129,10 +129,43 @@ class Database:
             self.__pending_files.clear()
         except:
             cur.execute("ROLLBACK;")
-            logging.exception("Could NOT commit metadata to the database! (%d metadata are pending)",
-                              len(self.__pending_metadata))
+            logging.exception("Could NOT commit all metadata at once to the database! Trying one by one now...")
+            self.__commit_metadata_single()
         finally:
             cur.close()
+
+    def __commit_metadata_single(self) -> None:
+        success_counter = 0
+        metadata_counter = len(self.__pending_metadata)
+        metada = self.__pending_metadata
+        pending_files = self.__pending_files
+        self.__pending_metadata.clear()
+        self.__pending_files.clear()
+
+        cur = self.__db_conn.cursor()
+        cur.execute("BEGIN;")
+        # noinspection PyBroadException
+        for index in range(metadata_counter):
+            cur.execute("BEGIN;")
+            try:
+                cur.executemany(
+                    "INSERT INTO torrents (info_hash, name, total_size, discovered_on) VALUES (?, ?, ?, ?);",
+                    [metadata[i]]
+                )
+                cur.executemany(
+                    "INSERT INTO files (torrent_id, size, path) "
+                    "VALUES ((SELECT id FROM torrents WHERE info_hash=?), ?, ?);",
+                    [pending_files[i]]
+                )
+                cur.execute("COMMIT;")
+                logging.info("%d metadata (%d files) are committed to the database.",
+                              len(self.__pending_metadata), len(self.__pending_files))
+                success_counter = succes_counter + 1
+            except:
+                cur.execute("ROLLBACK;")
+
+        logging.info("%d out of %d metadata could committed to the database.", success_counter, metadata_counter)
+        cur.close()
 
     def close(self) -> None:
         if self.__pending_metadata:
