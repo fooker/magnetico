@@ -17,6 +17,7 @@ import sqlite3
 import time
 import typing
 import os
+import sys
 
 from magneticod import bencode
 
@@ -162,6 +163,9 @@ class Database:
                 cur.execute("COMMIT;")
                 success_counter = succes_counter + 1
             except:
+                e = sys.exc_info()[0]
+                print("Tried to insert '{}'".format(metadata[i]))
+                print("Error message was: {}".format(e))
                 cur.execute("ROLLBACK;")
 
         logging.info("%d out of %d metadata could committed to the database.", success_counter, metadata_counter)
