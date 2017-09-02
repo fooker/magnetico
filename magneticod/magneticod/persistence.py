@@ -2,72 +2,77 @@
 # Copyright (C) 2017  Mert Bora ALPER <bora@boramalper.org>
 # Dedicated to Cemile Binay, in whose hands I thrived.
 #
-# This program is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General
-# Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any
+# This program is free software: you can redistribute it and/or modify it
+# under the terms of the GNU Affero General
+# Public License as published by the Free Software Foundation, either version
+#  3 of the License, or (at your option) any
 # later version.
 #
-# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied
-# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU Affero General Public License for more
+# This program is distributed in the hope that it will be useful, but WITHOUT
+#  ANY WARRANTY; without even the implied
+# warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU Affero General Public License for more
 # details.
 #
-# You should have received a copy of the GNU Affero General Public License along with this program.  If not, see
+# You should have received a copy of the GNU Affero General Public License
+# along with this program.  If not, see
 # <http://www.gnu.org/licenses/>.
 import logging
-import sqlite3
-import time
+import socket
 import typing
-import os
+from datetime import datetime
+from functools import lru_cache
+
+import elasticsearch
+from elasticsearch import Elasticsearch
+from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
+    Text, Nested
 
 from magneticod import bencode
 
-from .constants import PENDING_INFO_HASHES
+
+class File(InnerObjectWrapper):
+    path = Text()
+    size = Long()
+
+
+class Torrent(DocType):
+    name = Text()
+    size = Long()
+    found_at = Date()
+    found_by = Text()
+
+    files = Nested(doc_class=File)
+
+    class Meta:
+        index = 'torrents'
 
 
 class Database:
     def __init__(self, database) -> None:
-        self.__db_conn = self.__connect(database)
+        self.elastic = Elasticsearch(hosts=['192.168.200.1'], timeout=15)
+        Torrent.init(using=self.elastic)
 
-        # We buffer metadata to flush many entries at once, for performance reasons.
+        # We buffer metadata to flush many entries at once, for performance
+        # reasons.
         # list of tuple (info_hash, name, total_size, discovered_on)
-        self.__pending_metadata = []  # type: typing.List[typing.Tuple[bytes, str, int, int]]
+        self.__pending_metadata = []  # type: typing.List[typing.Tuple[bytes,
+        #  str, int, int]]
         # list of tuple (info_hash, size, path)
-        self.__pending_files = []  # type: typing.List[typing.Tuple[bytes, int, bytes]]
-
-    @staticmethod
-    def __connect(database) -> sqlite3.Connection:
-        os.makedirs(os.path.split(database)[0], exist_ok=True)
-        db_conn = sqlite3.connect(database, isolation_level=None)
-
-        db_conn.execute("PRAGMA journal_mode=WAL;")
-        db_conn.execute("PRAGMA temp_store=1;")
-        db_conn.execute("PRAGMA foreign_keys=ON;")
-
-        with db_conn:
-            db_conn.execute("CREATE TABLE IF NOT EXISTS torrents ("
-                            "id             INTEGER PRIMARY KEY AUTOINCREMENT,"
-                            "info_hash      BLOB NOT NULL UNIQUE,"
-                            "name           TEXT NOT NULL,"
-                            "total_size     INTEGER NOT NULL CHECK(total_size > 0),"
-                            "discovered_on  INTEGER NOT NULL CHECK(discovered_on > 0)"
-                            ");")
-            db_conn.execute("CREATE INDEX IF NOT EXISTS info_hash_index ON torrents (info_hash);")
-            db_conn.execute("CREATE TABLE IF NOT EXISTS files ("
-                            "id          INTEGER PRIMARY KEY,"
-                            "torrent_id  INTEGER REFERENCES torrents ON DELETE CASCADE ON UPDATE RESTRICT,"
-                            "size        INTEGER NOT NULL,"
-                            "path        TEXT NOT NULL"
-                            ");")
-
-        return db_conn
+        self.__pending_files = []  # type: typing.List[typing.Tuple[bytes,
+        # int, bytes]]
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
-        files = []
-        discovered_on = int(time.time())
+        torrent = Torrent()
+        torrent.meta.id = info_hash.hex()
+        torrent.found_at = datetime.utcnow()
+        torrent.found_by = socket.gethostname()
+        torrent.size = 0
         try:
             info = bencode.loads(metadata)
 
             assert b"/" not in info[b"name"]
-            name = info[b"name"].decode("utf-8")
+            torrent.name = info[b"name"].decode("utf-8")
 
             if b"files" in info:  # Multiple File torrent:
                 for file in info[b"files"]:
@@ -75,66 +80,38 @@ class Database:
                     # Refuse trailing slash in any of the path items
                     assert not any(b"/" in item for item in file[b"path"])
                     path = "/".join(i.decode("utf-8") for i in file[b"path"])
-                    files.append((info_hash, file[b"length"], path))
+                    torrent.files.append(
+                        {'size': file[b"length"], 'path': path})
+                    torrent.size += file[b"length"]
             else:  # Single File torrent:
                 assert type(info[b"length"]) is int
-                files.append((info_hash, info[b"length"], name))
+                torrent.files.append(
+                    {'size': info[b"length"], 'path': torrent.name})
+                torrent.size = info[b"length"]
         # TODO: Make sure this catches ALL, AND ONLY operational errors
-        except (bencode.BencodeDecodingError, AssertionError, KeyError, AttributeError, UnicodeDecodeError, TypeError):
+            assert (torrent.size != 0)
+        except (
+        bencode.BencodeDecodingError, AssertionError, KeyError, AttributeError,
+        UnicodeDecodeError, TypeError):
+            logging.error("exception")
             return False
 
-        self.__pending_metadata.append((info_hash, name, sum(f[1] for f in files), discovered_on))
-        # MYPY BUG: error: Argument 1 to "__iadd__" of "list" has incompatible type List[Tuple[bytes, Any, str]];
-        #     expected Iterable[Tuple[bytes, int, bytes]]
-        # List is an Iterable man...
-        self.__pending_files += files  # type: ignore
+        logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
 
-        logging.info("Added: `%s`", name)
+        torrent.save(using=self.elastic)
 
-        # Automatically check if the buffer is full, and commit to the SQLite database if so.
-        if len(self.__pending_metadata) >= PENDING_INFO_HASHES:
-            self.__commit_metadata()
+        logging.info(self.is_infohash_new.cache_info())
 
         return True
 
+    @lru_cache(maxsize=4096)
     def is_infohash_new(self, info_hash):
-        if info_hash in [x[0] for x in self.__pending_metadata]:
-            return False
-        cur = self.__db_conn.cursor()
         try:
-            cur.execute("SELECT count(info_hash) FROM torrents where info_hash = ?;", [info_hash])
-            x, = cur.fetchone()
-            return x == 0
-        finally:
-            cur.close()
+            self.elastic.get(index='torrents', id=info_hash.hex())
+        except elasticsearch.exceptions.NotFoundError:
+            return True
 
-    def __commit_metadata(self) -> None:
-        cur = self.__db_conn.cursor()
-        cur.execute("BEGIN;")
-        # noinspection PyBroadException
-        try:
-            cur.executemany(
-                "INSERT INTO torrents (info_hash, name, total_size, discovered_on) VALUES (?, ?, ?, ?);",
-                self.__pending_metadata
-            )
-            cur.executemany(
-                "INSERT INTO files (torrent_id, size, path) "
-                "VALUES ((SELECT id FROM torrents WHERE info_hash=?), ?, ?);",
-                self.__pending_files
-            )
-            cur.execute("COMMIT;")
-            logging.info("%d metadata (%d files) are committed to the database.",
-                          len(self.__pending_metadata), len(self.__pending_files))
-            self.__pending_metadata.clear()
-            self.__pending_files.clear()
-        except:
-            cur.execute("ROLLBACK;")
-            logging.exception("Could NOT commit metadata to the database! (%d metadata are pending)",
-                              len(self.__pending_metadata))
-        finally:
-            cur.close()
+        return False
 
     def close(self) -> None:
-        if self.__pending_metadata:
-            self.__commit_metadata()
-        self.__db_conn.close()
+        pass
