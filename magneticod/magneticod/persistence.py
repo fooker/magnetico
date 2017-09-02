@@ -26,8 +26,10 @@ import elasticsearch
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
     Text, Nested
+from elasticsearch.helpers import bulk
 
 from magneticod import bencode
+from magneticod.constants import PENDING_INFO_HASHES
 
 logging.getLogger('elasticsearch').setLevel(logging.ERROR)
 
@@ -54,6 +56,8 @@ class Database:
         logging.info("elasticsearch via {}".format(', '.join(hosts)))
         self.elastic = Elasticsearch(hosts=hosts, timeout=15)
         Torrent.init(using=self.elastic)
+
+        self.pending = []
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
         torrent = Torrent()
@@ -90,13 +94,23 @@ class Database:
             logging.exception("Error during metadata decoding")
             return False
 
+        self.pending.append(torrent)
         logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
 
-        torrent.save(using=self.elastic)
+        if len(self.pending) >= PENDING_INFO_HASHES:
+            self.commit()
 
-        logging.info(self.is_infohash_new.cache_info())
+        #torrent.save(using=self.elastic)
+        #logging.info(self.is_infohash_new.cache_info())
 
         return True
+
+    def commit(self):
+        logging.info("Committing %d torrents" % len(self.pending))
+        bulk(self.elastic, (torrent.to_dict(True) for torrent in self.pending))
+        self.pending.clear()
+        logging.info(self.is_infohash_new.cache_info())
+
 
     @lru_cache(maxsize=4096)
     def is_infohash_new(self, info_hash):
