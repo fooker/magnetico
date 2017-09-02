@@ -217,7 +217,7 @@ class SybilNode(asyncio.DatagramProtocol):
         else:
             peer_addr = (addr[0], port)
 
-        if not self.__database.is_infohash_new(info_hash):
+        if self.__database.infohash_exists(info_hash):
             return
 
         event_loop = asyncio.get_event_loop()

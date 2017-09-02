@@ -21,10 +21,9 @@ import logging
 import socket
 from datetime import datetime
 
-import elasticsearch
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
-    Text, Nested, String, Keyword
+    Nested, String, Keyword
 from elasticsearch.helpers import bulk
 from lru import LRU
 
@@ -59,9 +58,6 @@ class Database:
         Torrent.init(using=self.elastic)
 
         self.infohash_lru = LRU(2**14)
-        self.lru_hit = 0
-        self.lru_miss = 0
-
         self.pending = []
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
@@ -100,7 +96,7 @@ class Database:
             return False
 
         self.pending.append(torrent)
-        self.infohash_lru[info_hash] = False
+        self.infohash_lru[info_hash] = True
         logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
 
         if len(self.pending) >= PENDING_INFO_HASHES:
@@ -115,7 +111,7 @@ class Database:
         stats = self.infohash_lru.get_stats() + (len(self.infohash_lru.keys()), self.infohash_lru.get_size())
         logging.info("Infohash LRU-Cache (Hit: {}, Miss: {}, Fullness: {}/{})".format(*stats))
 
-    def is_infohash_new(self, info_hash):
+    def infohash_exists(self, info_hash):
         try:
             return self.infohash_lru[info_hash]
         except KeyError:
