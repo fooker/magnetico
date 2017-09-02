@@ -24,7 +24,7 @@ from datetime import datetime
 import elasticsearch
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
-    Text, Nested
+    Text, Nested, String, Keyword
 from elasticsearch.helpers import bulk
 from lru import LRU
 
@@ -35,15 +35,15 @@ logging.getLogger('elasticsearch').setLevel(logging.ERROR)
 
 
 class File(InnerObjectWrapper):
-    path = Text()
+    path = String()
     size = Long()
 
 
 class Torrent(DocType):
-    name = Text()
+    name = String()
     size = Long()
     found_at = Date()
-    found_by = Text()
+    found_by = Keyword()
 
     files = Nested(doc_class=File)
 
