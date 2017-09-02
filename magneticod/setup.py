@@ -12,7 +12,9 @@ def run_setup():
         "appdirs >= 1.4.3",
         "humanfriendly",
         "better_bencode >= 0.2.1",
-        "cerberus >= 1.1"
+        "cerberus >= 1.1",
+        "elasticsearch-dsl",
+        "lru-dict"
     ]
 
     if sys.platform in ["linux", "darwin"]:

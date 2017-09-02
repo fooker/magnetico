@@ -20,13 +20,13 @@
 import logging
 import socket
 from datetime import datetime
-from functools import lru_cache
 
 import elasticsearch
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
     Text, Nested
 from elasticsearch.helpers import bulk
+from lru import LRU
 
 from magneticod import bencode
 from magneticod.constants import PENDING_INFO_HASHES
@@ -49,6 +49,7 @@ class Torrent(DocType):
 
     class Meta:
         index = 'torrents'
+        doc_type = 'torrent'
 
 
 class Database:
@@ -56,6 +57,10 @@ class Database:
         logging.info("elasticsearch via {}".format(', '.join(hosts)))
         self.elastic = Elasticsearch(hosts=hosts, timeout=15)
         Torrent.init(using=self.elastic)
+
+        self.infohash_lru = LRU(2**14)
+        self.lru_hit = 0
+        self.lru_miss = 0
 
         self.pending = []
 
@@ -95,13 +100,11 @@ class Database:
             return False
 
         self.pending.append(torrent)
+        self.infohash_lru[info_hash] = False
         logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
 
         if len(self.pending) >= PENDING_INFO_HASHES:
             self.commit()
-
-        #torrent.save(using=self.elastic)
-        #logging.info(self.is_infohash_new.cache_info())
 
         return True
 
@@ -109,17 +112,18 @@ class Database:
         logging.info("Committing %d torrents" % len(self.pending))
         bulk(self.elastic, (torrent.to_dict(True) for torrent in self.pending))
         self.pending.clear()
-        logging.info(self.is_infohash_new.cache_info())
+        stats = self.infohash_lru.get_stats() + (len(self.infohash_lru.keys()), self.infohash_lru.get_size())
+        logging.info("Infohash LRU-Cache (Hit: {}, Miss: {}, Fullness: {}/{})".format(*stats))
 
-
-    @lru_cache(maxsize=4096)
     def is_infohash_new(self, info_hash):
         try:
-            self.elastic.get(index='torrents', id=info_hash.hex())
-        except elasticsearch.exceptions.NotFoundError:
-            return True
+            return self.infohash_lru[info_hash]
+        except KeyError:
+            pass
 
-        return False
+        exists = self.elastic.exists(index='torrents', id=info_hash.hex(), doc_type='torrent')
+        self.infohash_lru[info_hash] = exists
+        return exists
 
     def close(self) -> None:
         pass
