@@ -23,7 +23,7 @@ from datetime import datetime
 
 from elasticsearch import Elasticsearch
 from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
-    Nested, String, Keyword
+    Nested, String, Keyword, Field, Text
 from elasticsearch.helpers import bulk
 from lru import LRU
 
@@ -33,18 +33,15 @@ from magneticod.constants import PENDING_INFO_HASHES
 logging.getLogger('elasticsearch').setLevel(logging.ERROR)
 
 
-class File(InnerObjectWrapper):
-    path = String()
-    size = Long()
-
-
 class Torrent(DocType):
-    name = String()
+    name = Text(fields={'keyword': Keyword(ignore_above=4096)})
     size = Long()
     found_at = Date()
     found_by = Keyword()
 
-    files = Nested(doc_class=File)
+    files = Nested()
+    files.field('path', 'text', fields={'keyword': Keyword(ignore_above=4096)})
+    files.field('size', 'long')
 
     class Meta:
         index = 'torrents'
