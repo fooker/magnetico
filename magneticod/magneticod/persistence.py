@@ -49,18 +49,10 @@ class Torrent(DocType):
 
 
 class Database:
-    def __init__(self, database) -> None:
-        self.elastic = Elasticsearch(hosts=['192.168.200.1'], timeout=15)
+    def __init__(self, hosts) -> None:
+        logging.info("elasticsearch via {}".format(', '.join(hosts)))
+        self.elastic = Elasticsearch(hosts=hosts, timeout=15)
         Torrent.init(using=self.elastic)
-
-        # We buffer metadata to flush many entries at once, for performance
-        # reasons.
-        # list of tuple (info_hash, name, total_size, discovered_on)
-        self.__pending_metadata = []  # type: typing.List[typing.Tuple[bytes,
-        #  str, int, int]]
-        # list of tuple (info_hash, size, path)
-        self.__pending_files = []  # type: typing.List[typing.Tuple[bytes,
-        # int, bytes]]
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
         torrent = Torrent()

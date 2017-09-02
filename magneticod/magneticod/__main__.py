@@ -83,7 +83,7 @@ def parse_cmdline_arguments(args: typing.List[str]) -> typing.Optional[argparse.
     )
 
     parser.add_argument(
-        "--node-addr", action="store", type=parse_ip_port, required=False, default="0.0.0.0:0",
+        "-l", "--node-addr", action="store", type=parse_ip_port, required=False, default="0.0.0.0:0",
         help="the address of the (DHT) node magneticod will use"
     )
 
@@ -92,11 +92,10 @@ def parse_cmdline_arguments(args: typing.List[str]) -> typing.Optional[argparse.
         help="Limit metadata size to protect memory overflow. Provide in human friendly format eg. 1 M, 1 GB"
     )
 
-    default_database_dir = os.path.join(appdirs.user_data_dir("magneticod"), "database.sqlite3")
     parser.add_argument(
-        "--database-file", type=str, default=default_database_dir,
-        help="Path to database file (default: {})".format(humanfriendly.format_path(default_database_dir))
-    )
+        "-e", "--elastic-hosts", type=str, required=True,
+        help="Elasticsearch host addresses, comma-separated")
+
     parser.add_argument(
         '-d', '--debug',
         action="store_const", dest="loglevel", const=logging.DEBUG, default=logging.INFO,
@@ -123,7 +122,7 @@ def main() -> int:
 
     # noinspection PyBroadException
     try:
-        database = persistence.Database(arguments.database_file)
+        database = persistence.Database(arguments.elastic_hosts.split(','))
     except:
         logging.exception("could NOT connect to the database!")
         return 1
