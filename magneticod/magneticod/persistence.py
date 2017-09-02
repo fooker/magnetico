@@ -19,7 +19,6 @@
 # <http://www.gnu.org/licenses/>.
 import logging
 import socket
-import typing
 from datetime import datetime
 from functools import lru_cache
 
@@ -29,6 +28,8 @@ from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
     Text, Nested
 
 from magneticod import bencode
+
+logging.getLogger('elasticsearch').setLevel(logging.ERROR)
 
 
 class File(InnerObjectWrapper):
@@ -63,29 +64,30 @@ class Database:
         try:
             info = bencode.loads(metadata)
 
-            assert b"/" not in info[b"name"]
-            torrent.name = info[b"name"].decode("utf-8")
+            assert b'/' not in info[b'name']
+            torrent.name = info[b'name'].decode("utf-8")
 
-            if b"files" in info:  # Multiple File torrent:
-                for file in info[b"files"]:
-                    assert type(file[b"length"]) is int
+            if b'files' in info:  # Multiple File torrent:
+                for file in info[b'files']:
+                    assert type(file[b'length']) is int
                     # Refuse trailing slash in any of the path items
-                    assert not any(b"/" in item for item in file[b"path"])
-                    path = "/".join(i.decode("utf-8") for i in file[b"path"])
+                    assert not any(b"/" in item for item in file[b'path'])
+                    path = '/'.join(i.decode('utf-8') for i in file[b'path'])
                     torrent.files.append(
-                        {'size': file[b"length"], 'path': path})
-                    torrent.size += file[b"length"]
+                        {'size': file[b'length'], 'path': path})
+                    torrent.size += file[b'length']
             else:  # Single File torrent:
-                assert type(info[b"length"]) is int
+                assert type(info[b'length']) is int
                 torrent.files.append(
-                    {'size': info[b"length"], 'path': torrent.name})
-                torrent.size = info[b"length"]
-        # TODO: Make sure this catches ALL, AND ONLY operational errors
+                    {'size': info[b'length'], 'path': torrent.name})
+                torrent.size = info[b'length']
+                # TODO: Make sure this catches ALL, AND ONLY operational errors
             assert (torrent.size != 0)
         except (
-        bencode.BencodeDecodingError, AssertionError, KeyError, AttributeError,
-        UnicodeDecodeError, TypeError):
-            logging.error("exception")
+                bencode.BencodeDecodingError, AssertionError, KeyError,
+                AttributeError,
+                UnicodeDecodeError, TypeError) as ex:
+            logging.exception("Error during metadata decoding")
             return False
 
         logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
