@@ -119,4 +119,5 @@ class Database:
         return exists
 
     def close(self) -> None:
-        pass
+        if len(self.pending) > 0:
+            self.commit()
