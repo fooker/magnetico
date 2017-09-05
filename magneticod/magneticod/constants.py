@@ -8,7 +8,7 @@ BOOTSTRAPPING_NODES = [
     ("dht.aelitis.com", 6881)
 ]
 # threshold for pending info hashes before being committed to database:
-PENDING_INFO_HASHES = 10
+PENDING_INFO_HASHES = 25
 
 TICK_INTERVAL = 1  # in seconds
 
