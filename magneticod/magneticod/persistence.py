@@ -20,12 +20,12 @@
 import logging
 import socket
 from datetime import datetime
+from lru import LRU
 
 from elasticsearch import Elasticsearch
-from elasticsearch_dsl import DocType, InnerObjectWrapper, Date, Long, \
-    Nested, String, Keyword, Field, Text
 from elasticsearch.helpers import bulk
-from lru import LRU
+from elasticsearch_dsl import DocType, Date, Long, \
+    Nested, Keyword, Text
 
 from magneticod import bencode
 from magneticod.constants import PENDING_INFO_HASHES
@@ -54,7 +54,7 @@ class Database:
         self.elastic = Elasticsearch(hosts=hosts, timeout=15)
         Torrent.init(using=self.elastic)
 
-        self.infohash_lru = LRU(2**14)
+        self.infohash_lru = LRU(2**18)
         self.pending = []
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
@@ -105,8 +105,12 @@ class Database:
         logging.info("Committing %d torrents" % len(self.pending))
         bulk(self.elastic, (torrent.to_dict(True) for torrent in self.pending))
         self.pending.clear()
-        stats = self.infohash_lru.get_stats() + (len(self.infohash_lru.keys()), self.infohash_lru.get_size())
-        logging.info("Infohash LRU-Cache (Hit: {}, Miss: {}, Fullness: {}/{})".format(*stats))
+        hit, miss = self.infohash_lru.get_stats()
+        logging.info("Infohash LRU-Cache (Hit/Miss: {}:{} ({}%), Fullness: {}/{})".format(
+            hit, miss, round(float(hit)/(hit+miss)*100, 1),
+            len(self.infohash_lru.keys()),
+            self.infohash_lru.get_size()
+        ))
 
     def infohash_exists(self, info_hash):
         try:
