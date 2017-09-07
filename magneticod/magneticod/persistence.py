@@ -115,8 +115,8 @@ class Database:
 
         return True
 
-    async def commit(self, torrents):
-        if self.backoff_until > time.time():
+    async def commit(self, torrents, ignore_backoff=False):
+        if self.backoff_until > time.time() and not ignore_backoff:
             return
 
         logging.info("Committing %d torrents" % len(self.pending))
@@ -150,4 +150,4 @@ class Database:
 
     async def close(self) -> None:
         if len(self.pending) > 0:
-            await self.commit(self.pending)
+            await self.commit(self.pending, ignore_backoff=True)
