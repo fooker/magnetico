@@ -17,3 +17,6 @@ TICK_INTERVAL = 1  # in seconds
 MAX_ACTIVE_PEERS_PER_INFO_HASH = 5
 
 PEER_TIMEOUT = 120  # seconds
+
+# database timeout backoff settings
+MAX_BACKOFF_TIME = 64

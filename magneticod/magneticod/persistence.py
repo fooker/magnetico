@@ -19,6 +19,7 @@
 # <http://www.gnu.org/licenses/>.
 import logging
 import socket
+import time
 from datetime import datetime
 
 import asyncio
@@ -28,7 +29,7 @@ from elasticsearch_dsl import DocType, Date, Long, \
     Nested, Keyword, Text
 
 from magneticod import bencode
-from magneticod.constants import PENDING_INFO_HASHES
+from magneticod.constants import PENDING_INFO_HASHES, MAX_BACKOFF_TIME
 from magneticod.cache import RedisLRUCache, LRUDictCache
 
 logging.getLogger('elasticsearch').setLevel(logging.ERROR)
@@ -67,6 +68,8 @@ class Database:
             self.cache = LRUDictCache()
 
         self.pending = set()
+        self.backoff_until = 0
+        self.backoff_errors = 0
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
         torrent = Torrent()
@@ -113,9 +116,21 @@ class Database:
         return True
 
     async def commit(self, torrents):
+        if self.backoff_until > time.time():
+            return
+
         logging.info("Committing %d torrents" % len(self.pending))
-        bulk(self.elastic, (torrent.to_dict(True) for torrent in torrents))
+        try:
+            bulk(self.elastic, (torrent.to_dict(True) for torrent in self.pending))
+        except socket.timeout:
+            self.backoff_errors += 1
+            backoff_penalty = min(2 ** self.backoff_errors, MAX_BACKOFF_TIME)
+            self.backoff_until = time.time() + backoff_penalty
+            logging.info("db timeout #%d, waiting %ds before next retry" % (
+                self.backoff_errors, backoff_penalty,
+            ))
         self.pending = self.pending.difference(torrents)
+        self.backoff_errors = 0
         logging.info("Cache: Hit/Miss %d:%d (%.1f%%)" % self.cache.stats())
 
     def infohash_exists(self, info_hash):
