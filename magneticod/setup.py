@@ -14,7 +14,8 @@ def run_setup():
         "better_bencode >= 0.2.1",
         "cerberus >= 1.1",
         "elasticsearch-dsl",
-        "lru-dict"
+        "lru-dict",
+        "redis"
     ]
 
     if sys.platform in ["linux", "darwin"]:
