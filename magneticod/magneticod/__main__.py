@@ -97,6 +97,11 @@ def parse_cmdline_arguments(args: typing.List[str]) -> typing.Optional[argparse.
         help="Elasticsearch host addresses, comma-separated")
 
     parser.add_argument(
+        "-r", "--redis", action="store_true",
+        help="Use redis to cache existing infohashes"
+    )
+
+    parser.add_argument(
         '-d', '--debug',
         action="store_const", dest="loglevel", const=logging.DEBUG, default=logging.INFO,
         help="Print debugging information in addition to normal processing.",
@@ -122,7 +127,9 @@ def main() -> int:
 
     # noinspection PyBroadException
     try:
-        database = persistence.Database(arguments.elastic_hosts.split(','))
+        database = persistence.Database(
+            arguments.elastic_hosts.split(','), arguments.redis
+        )
     except:
         logging.exception("could NOT connect to the database!")
         return 1
@@ -137,7 +144,7 @@ def main() -> int:
         logging.critical("Keyboard interrupt received! Exiting gracefully...")
     finally:
         loop.run_until_complete(node.shutdown())
-        database.close()
+        loop.run_until_complete(database.close())
 
     return 0
 

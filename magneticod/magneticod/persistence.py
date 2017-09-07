@@ -20,8 +20,8 @@
 import logging
 import socket
 from datetime import datetime
-from lru import LRU
 
+import asyncio
 from elasticsearch import Elasticsearch
 from elasticsearch.helpers import bulk
 from elasticsearch_dsl import DocType, Date, Long, \
@@ -29,6 +29,7 @@ from elasticsearch_dsl import DocType, Date, Long, \
 
 from magneticod import bencode
 from magneticod.constants import PENDING_INFO_HASHES
+from magneticod.cache import RedisLRUCache, LRUDictCache
 
 logging.getLogger('elasticsearch').setLevel(logging.ERROR)
 
@@ -47,9 +48,12 @@ class Torrent(DocType):
         index = 'torrents'
         doc_type = 'torrent'
 
+    def __hash__(self):
+        return hash(self.meta.id)
+
 
 class Database:
-    def __init__(self, hosts) -> None:
+    def __init__(self, hosts, redis=None) -> None:
         logging.info("elasticsearch via {}".format(', '.join(hosts)))
         self.elastic = Elasticsearch(
             hosts=hosts, retry_on_timeout=True,
@@ -57,8 +61,12 @@ class Database:
         )
         Torrent.init(using=self.elastic)
 
-        self.infohash_lru = LRU(2**18)
-        self.pending = []
+        if redis:
+            self.cache = RedisLRUCache()
+        else:
+            self.cache = LRUDictCache()
+
+        self.pending = set()
 
     def add_metadata(self, info_hash: bytes, metadata: bytes) -> bool:
         torrent = Torrent()
@@ -92,39 +100,39 @@ class Database:
                 bencode.BencodeDecodingError, AssertionError, KeyError,
                 AttributeError,
                 UnicodeDecodeError, TypeError) as ex:
-            logging.exception("Error during metadata decoding")
+            #  logging.exception("Error during metadata decoding")
             return False
 
-        self.pending.append(torrent)
-        self.infohash_lru[info_hash] = True
+        self.pending.add(torrent)
+        self.cache.put(info_hash)
         logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
 
         if len(self.pending) >= PENDING_INFO_HASHES:
-            self.commit()
+            asyncio.ensure_future(self.commit(frozenset(self.pending)))
 
         return True
 
-    def commit(self):
+    async def commit(self, torrents):
         logging.info("Committing %d torrents" % len(self.pending))
-        bulk(self.elastic, (torrent.to_dict(True) for torrent in self.pending))
-        self.pending.clear()
-        hit, miss = self.infohash_lru.get_stats()
-        logging.info("Infohash LRU-Cache (Hit/Miss: {}:{} ({}%), Fullness: {}/{})".format(
-            hit, miss, round(float(hit)/(hit+miss)*100, 1),
-            len(self.infohash_lru.keys()),
-            self.infohash_lru.get_size()
-        ))
+        bulk(self.elastic, (torrent.to_dict(True) for torrent in torrents))
+        self.pending = self.pending.difference(torrents)
+        logging.info("Cache: Hit/Miss %d:%d (%.1f%%)" % self.cache.stats())
 
     def infohash_exists(self, info_hash):
-        try:
-            return self.infohash_lru[info_hash]
-        except KeyError:
-            pass
+        # query cache
+        if self.cache.exists(info_hash):
+            return True
 
-        exists = self.elastic.exists(index='torrents', id=info_hash.hex(), doc_type='torrent')
-        self.infohash_lru[info_hash] = exists
+        # query database
+        exists = self.elastic.exists(
+            index='torrents', id=info_hash.hex(), doc_type='torrent'
+        )
+        if exists:
+            # update cache if infohash exists
+            self.cache.put(info_hash)
+
         return exists
 
-    def close(self) -> None:
+    async def close(self) -> None:
         if len(self.pending) > 0:
-            self.commit()
+            await self.commit(self.pending)
