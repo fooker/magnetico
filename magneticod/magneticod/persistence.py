@@ -57,7 +57,7 @@ class Database:
         logging.info("elasticsearch via {}".format(', '.join(hosts)))
         self.elastic = Elasticsearch(
             hosts=hosts, retry_on_timeout=True,
-            sniff_on_start=True, sniff_on_failure=True, sniffer_timeout=60
+            #sniff_on_start=True, sniff_on_failure=True, sniffer_timeout=60
         )
         Torrent.init(using=self.elastic)
 
