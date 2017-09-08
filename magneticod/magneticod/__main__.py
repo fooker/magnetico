@@ -18,7 +18,6 @@ import logging
 import ipaddress
 import textwrap
 import urllib.parse
-import os
 import sys
 import typing
 
@@ -34,7 +33,7 @@ from . import persistence
 def parse_ip_port(netloc: str) -> typing.Optional[typing.Tuple[str, int]]:
     # In case no port supplied
     try:
-        return str(ipaddress.ip_address(netloc)), 0
+        return str(ipaddress.ip_address(netloc)), 6881
     except ValueError:
         pass
 
