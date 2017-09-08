@@ -19,8 +19,11 @@ import logging
 import socket
 import typing
 import os
+from functools import partial
+from ipaddress import ip_address
 
-from .constants import BOOTSTRAPPING_NODES, MAX_ACTIVE_PEERS_PER_INFO_HASH, PEER_TIMEOUT, TICK_INTERVAL
+from .constants import BOOTSTRAPPING_NODES, BOOTSTRAPPING_NODES6,\
+    MAX_ACTIVE_PEERS_PER_INFO_HASH, PEER_TIMEOUT, TICK_INTERVAL
 from . import bencode
 from . import bittorrent
 from . import persistence
@@ -37,6 +40,8 @@ class SybilNode(asyncio.DatagramProtocol):
         self.__true_id = os.urandom(20)
 
         self._routing_table = {}  # type: typing.Dict[NodeID, NodeAddress]
+        self._address_family = None
+        self._bootstrap_nodes = None
 
         self.__token_secret = os.urandom(4)
         # Maximum number of neighbours (this is a THRESHOLD where, once reached, the search for new neighbours will
@@ -51,6 +56,13 @@ class SybilNode(asyncio.DatagramProtocol):
         logging.info("SybilNode %s initialized!", self.__true_id.hex().upper())
 
     async def launch(self, address):
+        if ip_address(address[0]).version == 4:
+            self._address_family = socket.AF_INET
+            self._bootstrap_nodes = BOOTSTRAPPING_NODES
+        else:
+            self._address_family = socket.AF_INET6
+            self._bootstrap_nodes = BOOTSTRAPPING_NODES6
+
         await asyncio.get_event_loop().create_datagram_endpoint(lambda: self, local_addr=address)
         logging.info("SybilNode is launched on %s!", address)
 
@@ -133,7 +145,8 @@ class SybilNode(asyncio.DatagramProtocol):
         except bencode.BencodeDecodingError:
             return
 
-        if isinstance(message.get(b"r"), dict) and type(message[b"r"].get(b"nodes")) is bytes:
+        if isinstance(message.get(b"r"), dict) \
+                and type(message[b"r"].get(b"nodes" if self._address_family == socket.AF_INET else b"nodes6")) is bytes:
             self.__on_FIND_NODE_response(message)
         elif message.get(b"q") == b"get_peers":
             self.__on_GET_PEERS_query(message, addr)
@@ -155,8 +168,11 @@ class SybilNode(asyncio.DatagramProtocol):
             return
 
         try:
-            nodes_arg = message[b"r"][b"nodes"]
-            assert type(nodes_arg) is bytes and len(nodes_arg) % 26 == 0
+            nodes_arg = message[b"r"][b"nodes" if self._address_family == socket.AF_INET else b"nodes6"]
+            if self._address_family == socket.AF_INET:
+                assert type(nodes_arg) is bytes and len(nodes_arg) % 26 == 0
+            else:
+                assert type(nodes_arg) is bytes and len(nodes_arg) % 38 == 0
         except (TypeError, KeyError, AssertionError):
             return
 
@@ -299,10 +315,9 @@ class SybilNode(asyncio.DatagramProtocol):
 
     async def __bootstrap(self) -> None:
         event_loop = asyncio.get_event_loop()
-        for node in BOOTSTRAPPING_NODES:
+        for node in self._bootstrap_nodes:
             try:
-                # AF_INET means ip4 only
-                responses = await event_loop.getaddrinfo(*node, family=socket.AF_INET)
+                responses = await event_loop.getaddrinfo(*node, family=self._address_family)
                 for (family, type, proto, canonname, sockaddr) in responses:
                     data = self.__build_FIND_NODE_query(self.__true_id)
                     self.sendto(data, sockaddr)
@@ -313,8 +328,7 @@ class SybilNode(asyncio.DatagramProtocol):
         for node_id, addr in self._routing_table.items():
             self.sendto(self.__build_FIND_NODE_query(node_id[:15] + self.__true_id[:5]), addr)
 
-    @staticmethod
-    def __decode_nodes(infos: bytes) -> typing.List[typing.Tuple[NodeID, NodeAddress]]:
+    def __decode_nodes(self, infos: bytes) -> typing.List[typing.Tuple[NodeID, NodeAddress]]:
         """ Reference Implementation:
         nodes = []
         for i in range(0, len(infos), 26):
@@ -327,16 +341,33 @@ class SybilNode(asyncio.DatagramProtocol):
         """
         """ Optimized Version: """
         # Because dot-access also has a cost
-        inet_ntoa = socket.inet_ntoa
+        inet_ntop = partial(socket.inet_ntop, self._address_family)
         int_from_bytes = int.from_bytes
-        return [
-            (infos[i:i+20], (inet_ntoa(infos[i+20:i+24]), int_from_bytes(infos[i+24:i+26], "big")))
-            for i in range(0, len(infos), 26)
-        ]
+
+        if self._address_family == socket.AF_INET:
+            return [(
+                # 20 byte infohash
+                infos[i:i+20],
+                # 4 byte IPv4 address
+                (inet_ntop(infos[i+20:i+24]),
+                # 2 byte port
+                int_from_bytes(infos[i+24:i+26], "big"))
+            ) for i in range(0, len(infos), 26)
+            ]
+        else:
+            return [(
+                # 20 byte infohash
+                infos[i:i + 20],
+                # 16 byte IPv6 address
+                (inet_ntop(infos[i + 20: i + 36]),
+                # 2 bytes port
+                int_from_bytes(infos[i + 36:i + 38], "big"))
+            ) for i in range(0, len(infos), 38)
+            ]
 
     def __calculate_token(self, addr: NodeAddress, info_hash: InfoHash) -> bytes:
         # Believe it or not, faster than using built-in hash (including conversion from int -> bytes of course)
-        checksum = zlib.adler32(b"%s%s%d%s" % (self.__token_secret, socket.inet_aton(addr[0]), addr[1], info_hash))
+        checksum = zlib.adler32(b"%s%s%d%s" % (self.__token_secret, socket.inet_pton(self._address_family, addr[0]), addr[1], info_hash))
         return checksum.to_bytes(4, "big")
 
     @staticmethod

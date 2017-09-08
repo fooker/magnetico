@@ -7,6 +7,12 @@ BOOTSTRAPPING_NODES = [
     ("router.utorrent.com", 6881),
     ("dht.aelitis.com", 6881)
 ]
+BOOTSTRAPPING_NODES6 = [
+    ("dht.transmissionbt.com", 6881),
+    ("dht.libtorrent.org", 25401),
+    ("router.silotis.us", 6881)
+]
+
 # threshold for pending info hashes before being committed to database:
 PENDING_INFO_HASHES = 25
 
