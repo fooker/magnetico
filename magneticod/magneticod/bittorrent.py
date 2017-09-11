@@ -116,7 +116,7 @@ class DisposablePeer:
     def __on_bt_handshake(self, message: bytes) -> None:
         """ on BitTorrent Handshake... send the extension initiate_the_bittorrent_handshake! """
         if message[25] != 16:
-            logging.info("Peer does NOT support the extension protocol")
+            raise ProtocolError("Peer does NOT support the extension protocol")
 
         msg_dict_dump = bencode.dumps({
             b"m": {
