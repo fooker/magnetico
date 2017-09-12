@@ -34,6 +34,8 @@ PeerAddress = typing.Tuple[str, int]
 InfoHash = bytes
 Metadata = bytes
 
+PORT_ZERO = int.to_bytes(0, 2, "big")
+
 
 class SybilNode(asyncio.DatagramProtocol):
     def __init__(self, database: persistence.Database, max_metadata_size):
@@ -181,7 +183,6 @@ class SybilNode(asyncio.DatagramProtocol):
         except AssertionError:
             return
 
-        nodes = [n for n in nodes if n[1][1] != 0]  # Ignore nodes with port 0.
         self._routing_table.update(nodes[:self.__n_max_neighbours - len(self._routing_table)])
 
     def __on_GET_PEERS_query(self, message: bencode.KRPCDict, addr: NodeAddress) -> None:  # pylint: disable=invalid-name
@@ -353,6 +354,7 @@ class SybilNode(asyncio.DatagramProtocol):
                 # 2 byte port
                 int_from_bytes(infos[i+24:i+26], "big"))
             ) for i in range(0, len(infos), 26)
+                if infos[i+24:i+26] != PORT_ZERO
             ]
         else:
             return [(
@@ -363,6 +365,7 @@ class SybilNode(asyncio.DatagramProtocol):
                 # 2 bytes port
                 int_from_bytes(infos[i + 36:i + 38], "big"))
             ) for i in range(0, len(infos), 38)
+                if infos[i+36:i+38] != PORT_ZERO
             ]
 
     def __calculate_token(self, addr: NodeAddress, info_hash: InfoHash) -> bytes:
