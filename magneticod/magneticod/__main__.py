@@ -82,7 +82,7 @@ def parse_cmdline_arguments(args: typing.List[str]) -> typing.Optional[argparse.
     )
 
     parser.add_argument(
-        "-l", "--node-addr", action="store", type=parse_ip_port, required=False, default="0.0.0.0:0",
+        "-l", "--node-addr", action="store", type=parse_ip_port, required=False, default="0.0.0.0",
         help="the address of the (DHT) node magneticod will use"
     )
 
