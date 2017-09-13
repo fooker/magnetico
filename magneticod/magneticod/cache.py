@@ -21,6 +21,7 @@ class Cache:
             self.hit += 1
         else:
             self.miss +=1
+
         return cache_hit
 
     def stats(self):
@@ -57,7 +58,7 @@ class LRUDictCache(Cache):
         logging.info("using lru-dict for infohash caching")
 
     def exists(self, info_hash):
-        self.ret(info_hash in self.cache)
+        return self.ret(info_hash in self.cache)
 
     def put(self, info_hash):
         self.cache[info_hash] = b''
