@@ -41,9 +41,10 @@ class Torrent(DocType):
     found_at = Date()
     found_by = Keyword()
 
-    files = Nested()
-    files.field('path', 'text', fields={'keyword': Keyword(ignore_above=4096)})
-    files.field('size', 'long')
+    files = Nested(properties={
+        'path': Text(fields={'keyword': Keyword(ignore_above=4096)}),
+        'size': Long(),
+    })
 
     class Meta:
         index = 'torrents'

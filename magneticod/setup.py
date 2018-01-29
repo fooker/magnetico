@@ -13,7 +13,7 @@ def run_setup():
         "humanfriendly",
         "better_bencode >= 0.2.1",
         "cerberus >= 1.1",
-        "elasticsearch-dsl",
+        "elasticsearch-dsl >= 6.0.0",
         "lru-dict",
         "redis"
     ]
