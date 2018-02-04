@@ -16,6 +16,9 @@ BOOTSTRAPPING_NODES6 = [
 # threshold for pending info hashes before being committed to database:
 PENDING_INFO_HASHES = 25
 
+# seconds to pass after forcing commit to database
+COMMIT_INTERVAL = 60
+
 TICK_INTERVAL = 1  # in seconds
 
 # maximum (inclusive) number of active (disposable) peers to fetch the
