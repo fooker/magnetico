@@ -29,7 +29,7 @@ from elasticsearch_dsl import DocType, Date, Long, \
     Nested, Keyword, Text
 
 from magneticod import bencode
-from magneticod.constants import PENDING_INFO_HASHES, MAX_BACKOFF_TIME
+from magneticod.constants import PENDING_INFO_HASHES, MAX_BACKOFF_TIME, COMMIT_INTERVAL
 from magneticod.cache import RedisLRUCache, LRUDictCache
 
 logging.getLogger('elasticsearch').setLevel(logging.ERROR)
@@ -69,6 +69,8 @@ class Database:
             self.cache = LRUDictCache()
 
         self.pending = set()
+        self.commited = time.time()
+
         self.backoff_until = 0
         self.backoff_errors = 0
 
@@ -111,7 +113,8 @@ class Database:
         self.cache.put(info_hash)
         logging.info("Added: `%s` (%s)", torrent.name, torrent.meta.id)
 
-        if len(self.pending) >= PENDING_INFO_HASHES:
+        if len(self.pending) >= PENDING_INFO_HASHES or \
+           time.time() - self.commited >= COMMIT_INTERVAL:
             asyncio.ensure_future(self.commit(frozenset(self.pending)))
 
         return True
@@ -131,6 +134,7 @@ class Database:
                 self.backoff_errors, backoff_penalty,
             ))
         self.pending = self.pending.difference(torrents)
+        self.commited = time.time()
         self.backoff_errors = 0
         logging.info("Cache: Hit/Miss %d:%d (%.1f%%)" % self.cache.stats())
 
