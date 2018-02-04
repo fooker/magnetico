@@ -38,8 +38,6 @@ def main() -> int:
         http_server.serve_forever()
     except KeyboardInterrupt:
         return 0
-    finally:
-        magneticow.close_db()
 
     return 1
 

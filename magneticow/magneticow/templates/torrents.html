@@ -25,30 +25,30 @@
             <tr>
                 <th><!-- Magnet link --></th>
                 <th>
-                {% if sorted_by == "name ASC" %}
-                    <a href="/torrents/?search={{ search }}&sort_by=name+DESC">Name ▲</a>
-                {% elif sorted_by == "name DESC" %}
-                    <a href="/torrents/?search={{ search }}&sort_by=name+ASC">Name ▼</a>
+                {% if sorted_by == "name asc" %}
+                    <a href="/torrents/?search={{ search }}&sort_by=name+desc">Name ▲</a>
+                {% elif sorted_by == "name desc" %}
+                    <a href="/torrents/?search={{ search }}&sort_by=name+asc">Name ▼</a>
                 {% else %}
-                    <a href="/torrents/?search={{ search }}&sort_by=name+ASC">Name</a>
+                    <a href="/torrents/?search={{ search }}&sort_by=name+asc">Name</a>
                 {% endif %}
                 </th>
                 <th>
-                {% if sorted_by == "total_size ASC" %}
-                    <a href="/torrents/?search={{ search }}&sort_by=total_size+DESC">Size ▲</a>
-                {% elif sorted_by == "total_size DESC" %}
-                    <a href="/torrents/?search={{ search }}&sort_by=total_size+ASC">Size ▼</a>
+                {% if sorted_by == "size asc" %}
+                    <a href="/torrents/?search={{ search }}&sort_by=size+desc">Size ▲</a>
+                {% elif sorted_by == "size desc" %}
+                    <a href="/torrents/?search={{ search }}&sort_by=size+asc">Size ▼</a>
                 {% else %}
-                    <a href="/torrents/?search={{ search }}&sort_by=total_size+ASC">Size</a>
+                    <a href="/torrents/?search={{ search }}&sort_by=size+asc">Size</a>
                 {% endif %}
                 </th>
                 <th>
-                {% if sorted_by == "discovered_on ASC" %}
-                    <a href="/torrents/?search={{ search }}&sort_by=discovered_on+DESC">Discovered on ▲</a>
-                {% elif sorted_by == "discovered_on DESC" %}
-                    <a href="/torrents/?search={{ search }}&sort_by=discovered_on+ASC">Discovered on ▼</a>
+                {% if sorted_by == "found_at asc" %}
+                    <a href="/torrents/?search={{ search }}&sort_by=found_at+desc">Discovered on ▲</a>
+                {% elif sorted_by == "found_at desc" %}
+                    <a href="/torrents/?search={{ search }}&sort_by=found_at+asc">Discovered on ▼</a>
                 {% else %}
-                    <a href="/torrents/?search={{ search }}&sort_by=discovered_on+DESC">Discovered on</a>
+                    <a href="/torrents/?search={{ search }}&sort_by=found_at+desc">Discovered on</a>
                 {% endif %}
                 </th>
             </tr>
@@ -59,9 +59,9 @@
                 <td><a href="magnet:?xt=urn:btih:{{ torrent.info_hash }}&dn={{ torrent.name }}">
                     <img src="{{ url_for('static', filename='assets/magnet.gif') }}" alt="Magnet link"
                          title="Download this torrent using magnet" /></a></td>
-                <td><a href="/torrents/{{ torrent.info_hash }}/{{ torrent.name }}">{{ torrent.name }}</a></td>
+                <td><a href="/torrents/{{ torrent.info_hash }}">{{ torrent.name }}</a></td>
                 <td>{{ torrent.size }}</td>
-                <td>{{ torrent.discovered_on }}</td>
+                <td>{{ torrent.found_at }}</td>
             </tr>
         {% endfor %}
         </tbody>

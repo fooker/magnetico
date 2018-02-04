@@ -49,7 +49,7 @@
         </pre>
     </noscript>
     <!-- Content of this element will be overwritten by the script -->
-    <pre>{% for file in torrent.files -%}{{ file.path }}{{ "\t" + file.size }}{{ "\n" }}{%- endfor %}</pre>
+    <pre>{% for file in torrent.files -%}{{ file.path.ljust(64) }}{{ file.size }}{{ "\n" }}{%- endfor %}</pre>
 </main>
 </body>
 </html>

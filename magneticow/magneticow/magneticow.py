@@ -16,18 +16,18 @@ import collections
 import datetime as dt
 from datetime import datetime
 import logging
-import sqlite3
-import os
 
-import appdirs
 import flask
+
+from elasticsearch import Elasticsearch
+from elasticsearch_dsl import Search, Q
 
 from magneticow import utils
 from magneticow.authorization import requires_auth, generate_feed_hash
 
 
 File = collections.namedtuple("file", ["path", "size"])
-Torrent = collections.namedtuple("torrent", ["info_hash", "name", "size", "discovered_on", "files"])
+Torrent = collections.namedtuple("torrent", ["info_hash", "name", "size", "found_at", "files"])
 
 
 app = flask.Flask(__name__)
@@ -40,10 +40,7 @@ magneticod_db = None
 @app.route("/")
 @requires_auth
 def home_page():
-    with magneticod_db:
-        # COUNT(ROWID) is much more inefficient since it scans the whole table, so use MAX(ROWID)
-        cur = magneticod_db.execute("SELECT MAX(ROWID) FROM torrents ;")
-        n_torrents = cur.fetchone()[0] or 0
+    n_torrents = Search(using=magneticod_db).count()
 
     return flask.render_template("homepage.html", n_torrents=n_torrents)
 
@@ -59,59 +56,52 @@ def torrents():
         "page": page
     }
 
-    SQL_query = """
-        SELECT
-            info_hash,
-            name,
-            total_size,
-            discovered_on
-        FROM torrents
-    """
+    q = Search(using=magneticod_db)
+
     if search:
-        SQL_query += """
-            INNER JOIN (
-                SELECT docid AS id, rank(matchinfo(fts_torrents, 'pcnxal')) AS rank
-                FROM fts_torrents
-                WHERE name MATCH ?
-            ) AS ranktable USING(id)
-        """
-    SQL_query += """
-        ORDER BY {}
-        LIMIT 20 OFFSET ?
-    """
+        q = q.query("simple_query_string",
+                    query=search,
+                    fields=["name"],
+                    default_operator="and")
 
     sort_by = flask.request.args.get("sort_by")
     allowed_sorts = [
         None,
-        "name ASC",
-        "name DESC",
-        "total_size ASC",
-        "total_size DESC",
-        "discovered_on ASC",
-        "discovered_on DESC"
+        "name asc",
+        "name desc",
+        "size asc",
+        "size desc",
+        "found_at asc",
+        "found_at desc"
     ]
     if sort_by not in allowed_sorts:
         return flask.Response("Invalid value for `sort_by! (Allowed values are %s)" % (allowed_sorts, ), 400)
 
-    if search:
-        if sort_by:
-            SQL_query = SQL_query.format(sort_by + ", " + "rank ASC")
-        else:
-            SQL_query = SQL_query.format("rank ASC")
+    if sort_by:
+        sort_by_field, sort_by_dir = sort_by.split(' ')
     else:
-        if sort_by:
-            SQL_query = SQL_query.format(sort_by + ", " + "id DESC")
-        else:
-            SQL_query = SQL_query.format("id DESC")
+        sort_by_field, sort_by_dir = None, None
 
-    with magneticod_db:
-        if search:
-            cur = magneticod_db.execute(SQL_query, (search, 20 * page))
+    if sort_by_field == "name":
+        sort_by_field = "name.keyword"
+
+    if search:
+        if sort_by_field:
+            q = q.sort({sort_by_field: {'order': sort_by_dir}},
+                       {'_score': {'order': 'asc'}})
         else:
-            cur = magneticod_db.execute(SQL_query, (20 * page, ))
-        context["torrents"] = [Torrent(t[0].hex(), t[1], utils.to_human_size(t[2]),
-                                       datetime.fromtimestamp(t[3]).strftime("%d/%m/%Y"), [])
-                               for t in cur.fetchall()]
+            q = q.sort({'_score': {'order': 'asc'}})
+    else:
+        if sort_by_field:
+            q = q.sort({sort_by_field: {'order': sort_by_dir}})
+
+    q = q[20 * (page + 0):20 * (page + 1)]
+
+    result = q.execute()
+
+    context["torrents"] = [Torrent(t.meta.id, t.name, utils.to_human_size(t.size),
+                                   t.found_at, [])
+                           for t in result.hits]
 
     if len(context["torrents"]) < 20:
         context["next_page_exists"] = False
@@ -131,26 +121,7 @@ def torrents():
     return flask.render_template("torrents.html", **context)
 
 
-@app.route("/torrents/<info_hash>/", defaults={"name": None})
-@requires_auth
-def torrent_redirect(**kwargs):
-    try:
-        info_hash = bytes.fromhex(kwargs["info_hash"])
-        assert len(info_hash) == 20
-    except (AssertionError, ValueError):  # In case info_hash variable is not a proper hex-encoded bytes
-        return flask.abort(400)
-
-    with magneticod_db:
-        cur = magneticod_db.execute("SELECT name FROM torrents WHERE info_hash=? LIMIT 1;", (info_hash,))
-        try:
-            name = cur.fetchone()[0]
-        except TypeError:  # In case no results returned, TypeError will be raised when we try to subscript None object
-            return flask.abort(404)
-
-    return flask.redirect("/torrents/%s/%s" % (kwargs["info_hash"], name), code=301)
-
-
-@app.route("/torrents/<info_hash>/<name>")
+@app.route("/torrents/<info_hash>", defaults={"name": None})
 @requires_auth
 def torrent(**kwargs):
     context = {}
@@ -161,20 +132,20 @@ def torrent(**kwargs):
     except (AssertionError, ValueError):  # In case info_hash variable is not a proper hex-encoded bytes
         return flask.abort(400)
 
-    with magneticod_db:
-        cur = magneticod_db.execute("SELECT id, name, discovered_on FROM torrents WHERE info_hash=? LIMIT 1;",
-                                    (info_hash,))
-        try:
-            torrent_id, name, discovered_on = cur.fetchone()
-        except TypeError:  # In case no results returned, TypeError will be raised when we try to subscript None object
-            return flask.abort(404)
+    try:
+        r = magneticod_db.get("torrents", info_hash.hex())
+    except TypeError:  # In case no results returned, TypeError will be raised when we try to subscript None object
+        return flask.abort(404)
 
-        cur = magneticod_db.execute("SELECT path, size FROM files WHERE torrent_id=?;", (torrent_id,))
-        raw_files = cur.fetchall()
-        size = sum(f[1] for f in raw_files)
-        files = [File(f[0], utils.to_human_size(f[1])) for f in raw_files]
+    r = r["_source"]
 
-    context["torrent"] = Torrent(info_hash.hex(), name, utils.to_human_size(size), datetime.fromtimestamp(discovered_on).strftime("%d/%m/%Y"), files)
+    files = sorted(File(f["path"], utils.to_human_size(f["size"])) for f in r["files"])
+
+    context["torrent"] = Torrent(info_hash=info_hash.hex(),
+                                 name=r["name"],
+                                 size=utils.to_human_size(r["size"]),
+                                 found_at=r["found_at"],
+                                 files=files)
 
     return flask.render_template("torrent.html", **context)
 
@@ -182,37 +153,26 @@ def torrent(**kwargs):
 @app.route("/statistics")
 @requires_auth
 def statistics():
-    # Ahhh...
-    # Time is hard, really. magneticod used time.time() to save when a torrent is discovered, unaware that none of the
-    # specifications say anything about the timezones (or their irrelevance to the UNIX time) and about leap seconds in
-    # a year.
-    # Nevertheless, we still use it. In future, before v1.0.0, we may change it as we wish, offering a migration
-    # solution for the current users. But in the meanwhile, be aware that all your calculations will be a bit lousy,
-    # though within tolerable limits for a torrent search engine.
-
-    with magneticod_db:
-        # latest_today is the latest UNIX timestamp of today, the very last second.
-        latest_today = int((dt.date.today() + dt.timedelta(days=1) - dt.timedelta(seconds=1)).strftime("%s"))
-        # Retrieve all the torrents discovered in the past 30 days (30 days * 24 hours * 60 minutes * 60 seconds...)
-        # Also, see http://www.sqlite.org/lang_datefunc.html for details of `date()`.
-        #     Function          Equivalent strftime()
-        #     date(...) 		strftime('%Y-%m-%d', ...)
-        cur = magneticod_db.execute(
-            "SELECT date(discovered_on, 'unixepoch') AS day, count() FROM torrents WHERE discovered_on >= ? "
-            "GROUP BY day;",
-            (latest_today - 30 * 24 * 60 * 60, )
-        )
-        results = cur.fetchall()  # for instance, [('2017-04-01', 17428), ('2017-04-02', 28342)]
+    s = Search(using=magneticod_db)
+    s.aggs.bucket("stats", {
+        "filter": {'range': {'found_at': {'gte': 'now-30d', 'lte': 'now'}}},
+        "aggs": {"count": {"date_histogram": {"field": "found_at",
+                                              "interval": "day"}}}})
+    print(s.to_dict())
+    r = s.execute()
 
     return flask.render_template("statistics.html", **{
         # We directly substitute them in the JavaScript code.
-        "dates": str([t[0] for t in results]),
-        "amounts": str([t[1] for t in results])
+        "dates": str([t['key'] for t in r.aggs.stats.count.buckets]),
+        "amounts": str([t['doc_count'] for t in r.aggs.stats.count.buckets])
     })
 
 
 @app.route("/feed")
 def feed():
+
+
+
     filter_ = flask.request.args["filter"]
     # Check for all possible users who might be requesting.
     # pylint disabled: because we do monkey-patch! [in magneticow.__main__.py:main()]
@@ -267,29 +227,4 @@ def initialize_magneticod_db() -> None:
 
     logging.info("Connecting to magneticod's database...")
 
-    magneticod_db_path = os.path.join(appdirs.user_data_dir("magneticod"), "database.sqlite3")
-    magneticod_db = sqlite3.connect(magneticod_db_path, isolation_level=None)
-
-    logging.info("Preparing for the full-text search (this might take a while)...")
-    with magneticod_db:
-        magneticod_db.execute("PRAGMA journal_mode=WAL;")
-
-        magneticod_db.execute("CREATE INDEX IF NOT EXISTS discovered_on_index ON torrents (discovered_on);")
-        magneticod_db.execute("CREATE INDEX IF NOT EXISTS info_hash_index ON torrents (info_hash);")
-        magneticod_db.execute("CREATE INDEX IF NOT EXISTS file_info_hash_index ON files (torrent_id);")
-
-        magneticod_db.execute("CREATE VIRTUAL TABLE temp.fts_torrents USING fts4(name);")
-        magneticod_db.execute("INSERT INTO fts_torrents (docid, name) SELECT id, name FROM torrents;")
-        magneticod_db.execute("INSERT INTO fts_torrents (fts_torrents) VALUES ('optimize');")
-
-        magneticod_db.execute("CREATE TEMPORARY TRIGGER on_torrents_insert AFTER INSERT ON torrents FOR EACH ROW BEGIN"
-                              "    INSERT INTO fts_torrents (docid, name) VALUES (NEW.id, NEW.name);"
-                              "END;")
-
-    magneticod_db.create_function("rank", 1, utils.rank)
-
-
-def close_db() -> None:
-    logging.info("Closing magneticod database...")
-    if magneticod_db is not None:
-        magneticod_db.close()
+    magneticod_db = Elasticsearch('192.168.200.4')
