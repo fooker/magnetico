@@ -61,7 +61,7 @@ def torrents():
     if search:
         q = q.query("simple_query_string",
                     query=search,
-                    fields=["name"],
+                    fields=["name.search", "file.path.search"],
                     default_operator="and")
 
     sort_by = flask.request.args.get("sort_by")
@@ -133,7 +133,7 @@ def torrent(**kwargs):
         return flask.abort(400)
 
     try:
-        r = magneticod_db.get("torrents", info_hash.hex())
+        r = magneticod_db.get(index="torrents", doc_type="torrent", id=info_hash.hex())
     except TypeError:  # In case no results returned, TypeError will be raised when we try to subscript None object
         return flask.abort(404)
 
